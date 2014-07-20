@@ -1,0 +1,164 @@
+# Reproducible Research assignment 1
+
+## Activity monitoring data
+
+This assignment makes use of data from a personal activity monitoring device. This device collects data at 5 minute intervals through out the day. The data consists of two months of data from an anonymous individual collected during the months of October and November, 2012 and include the number of steps taken in 5 minute intervals each day. 
+
+### Problem 1: loading and preprocessing data
+
+Data was downloaded from the course website. The code used to open and read the data is described below, but since knitr won't execute it we turned evaluation off. *Do* test the code in your own evaluation of this work, though. 
+
+```{r getdata}
+temp <- tempfile()
+download.file("http://d396qusza40orc.cloudfront.net/repdata/data/activity.zip",temp)
+unzip(temp)
+activity <- read.csv("C://Users/Marcelo/Documents/Coursera Data Science Specialization/activity.csv")
+
+col <- ncol(activity)
+row <- nrow(activity)
+nam <- colnames(activity)
+```
+
+By reading the CSV file, we got a data frame with **`r row`** observations of **`r col`** variables. 
+
+Some useful transforms to have: dates in Date format and intervals in minute format:
+
+```{r transforms}
+activity$date <- as.Date(activity$date)
+activity$interval <- sprintf("%04d",activity$interval)
+activity$interval <- as.POSIXct(strptime(activity$interval,format="%H%M"))
+```
+
+This is what the data frame looks like. 
+
+```{r summaries}
+head(activity)
+summary(activity)
+``` 
+
+### Problem 2: what is mean total number of steps taken per day?
+
+For this part of the assignment, we simply ignore the missing values in the dataset. This researcher chose to omit them. This code generates a histogram of the total number of steps actually recorded each day:
+
+```{r tapply, echo=T}
+actdata <- with(activity,tapply(steps,date,sum,na.rm=T))
+hist(actdata,breaks=20,main="Histogram of total steps per day",col="red",xlab="steps per day", ylab="# of days")
+actgdata <- as.data.frame(actdata)
+mea <- format(mean(actgdata$actdata,na.rm=T),digits=5)
+med <- format(median(actgdata$actdata,na.rm=T),digits=5)
+```
+
+Each day, an average of **`r mea`** steps are given. Half of the days register more than **`r med`** steps. Please notice that NAs may have made some of the days unrepresentative, and so a "true" average day would be quite different.  
+
+
+### Problem 3: what is the average daily activity pattern?
+
+This is a time series plot of the 5-minute interval (x-axis) and the average number of steps taken, averaged across all days (y-axis). 
+
+It shows the daily activity pattern of the phone's owner, still with NAs excluded. While the exclusion of NAs might cause us to be missing data, the average of the days might give us a clue as to what the actual pattern might be, if the user has regular walking habits like walking the dog every day at the same hour or so. 
+
+For some reason that eludes me, I wasn't able to put the actual time of the day in the X axis. 
+
+```{r timeseries}
+inter <- with(activity,tapply(steps,interval,mean,na.rm=T))
+inter <- as.data.frame(inter)
+plot(inter,type="l",main="Time series of mean steps per interval",ylab="Mean steps per interval",xlab="Interval")
+max <- max(inter$inter)
+```
+
+The 5-minute interval, on average across all the days in the dataset, which contains the maximum number of steps (**`r max`**) is the interval **835**.
+
+### Problem 4: Imputing missing values
+
+As we have previously mentioned, there are a number of days/intervals where there are missing values (coded as NA). The presence of missing days may introduce bias into some calculations or summaries of the data.
+
+The total number of missing values in the dataset can be calculated as this:
+
+```{r NAcount}
+not <- nrow(subset(activity,is.na(activity$steps)))
+perc <- round((not/row)*100,1)
+```
+
+Missing data accounts for **`r not`** cases, or more than **`r perc`%** of the data set. 
+
+From the researcher's experience with a pedometer app in a smartphone, missing data occurs when the program crashes, the device is turned off or the battery goes down. If you're not walking and the device is turned on, you merely record 0 steps.
+
+So, to better account for the usage patterns in the next step, we have to impute the missing values in the dataset. 
+
+From a tip given by colleague [karthikeyan Ramakrishnan][1] at the [discussion forum][2], we tried to use the R package [rrcovNA][3] to impute the missing values. Sounded fair. 
+
+We used the function for conducting sequential nearest neighbor 
+imputation ('impSeq'), which uses statistical measures of distance (mean & covariance) to impute missing values. There is a good explainer [available online][4]. 
+
+Calling rrcovNA seems to show all the package loading. Sorry for the inconvenience in the presentation. 
+
+```{r imputevals, echo=TRUE}
+library(rrcovNA)
+imputed.act <- as.data.frame(impSeq(activity))
+imputed.act$date  <- as.Date(activity$date)
+actdata2 <- tapply(imputed.act$steps,imputed.act$date,sum)
+```
+
+The above code creates a new dataset that is equal to the original dataset but with the missing data filled in. Let's compare summaries and heads:
+
+```{r newdataset}
+head(activity)
+summary(activity)
+head(imputed.act)
+summary(imputed.act)
+```
+
+Let's compare the histograms for both files, with imputed and non-imputed missing data. 
+
+```{r comparative}
+par(mfrow = c(1, 2))
+hist(actdata,breaks=20,main="Histogram of total steps per day",col="red",xlab="steps per day", ylab="# of days",ylim=c(0,15))
+
+hist(actdata2,breaks=20,main="Histogram of total imputed steps per day",col="red",xlab="steps per day", ylab="# of days",ylim=c(0,15))
+```
+
+Doesn't seem to have significantly changed the patterns in the database. In part this is good, because it seems not to introduce distortion in the overall patterns. But does it introduce distortion in each point? Further studies may assess that. 
+
+
+### Problem 5: Are there differences in activity patterns between weekdays and weekends?
+
+Create a new factor variable in the dataset with two levels - "weekday" and "weekend" indicating whether a given date is a weekday or weekend day.
+
+```{r weekdays, eval=F}
+imputed.act$date  <- activity$date
+newImputed <- transform(imputed.act, weekend=as.POSIXlt(imputed.act$date, format='%Y/%m/%d')$wday %in% c(0, 6))
+newImputed$dayOfWeek <- "weekday"
+newImputed$dayOfWeek[newImputed$weekend == TRUE]  <- "weekend"
+```
+
+Make a panel plot containing a time series plot (i.e. type = "l") of the 5-minute interval (x-axis) and the average number of steps taken, averaged across all weekday days or weekend days (y-axis).
+
+Here I got all confused and I need to go to work today. So, here is my clumsy attempt, without evaluating. 
+
+```{r lattice, eval=F}
+util <- subset(newImputed,newImputed$dayOfWeek=="weekday")
+fds <- subset(newImputed,newImputed$dayOfWeek=="weekend")
+mutil <- with(util,tapply(steps,interval,mean))
+mutil <- as.data.frame(mutil)
+mutil$interval <- rownames(mutil)
+mutil$weekday <- "weekday"
+mutil$meansteps <- mutil$mutil
+mfds <- with(fds,tapply(steps,interval,mean))
+mfds <- as.data.frame(mfds)
+mfds$interval <- rownames(mfds)
+mfds$weekday <- "weekend"
+mfds$meansteps <- mfds$mfds
+newone <- data.frame()
+newone <- rbind(newone,mutil[,2:4])
+newone <- rbind(newone,mfds[,2:4])
+
+library(lattice)
+p <- xyplot(meansteps~interval|weekday,data=newone)
+print(p)
+```
+
+
+[1]: https://class.coursera.org/repdata-004/forum/profile?user_id=3377826
+[2]: https://class.coursera.org/repdata-004/forum/thread?thread_id=84
+[3]: http://cran.r-project.org/web/packages/rrcovNA/index.html
+[4]: http://www.unt.edu/rss/class/Jon/Benchmarks/MissingValueImputation_JDS_Nov2010.pdf
